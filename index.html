@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>每日營收結算系統</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel (轉譯 React JSX) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        body {
+            -webkit-tap-highlight-color: transparent;
+        }
+        /* 避免手機下方安全區擋住內容 */
+        .pb-safe {
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+    </style>
+</head>
+<body class="bg-slate-100 font-sans">
+    
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        function App() {
+            const defaultFresh = [{ id: 'fresh-1', name: '', quantity: '', cost: '' }];
+            const defaultFrozen = [{ id: 'frozen-1', name: '', quantity: '', cost: '' }];
+
+            // 狀態管理
+            const [activeTab, setActiveTab] = useState('morning'); // 'morning' | 'evening'
+            const [saveStatus, setSaveStatus] = useState('已同步');
+            const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+
+            // 營業資料 States
+            const [revenue, setRevenue] = useState('');
+            const [freshFishItems, setFreshFishItems] = useState(defaultFresh);
+            const [frozenFishItems, setFrozenFishItems] = useState(defaultFrozen);
+            const [supplies, setSupplies] = useState('');
+            const [wages, setWages] = useState('');
+            const [rent, setRent] = useState('');
+
+            // 摺疊面板 States
+            const [expandedSections, setExpandedSections] = useState({
+                fresh: true,
+                frozen: true,
+                supplies: true,
+                expense: true
+            });
+
+            const toggleSection = (section) => {
+                setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+            };
+
+            // 結算結果 States
+            const [totalCost, setTotalCost] = useState(0);
+            const [totalExpense, setTotalExpense] = useState(0);
+            const [netProfit, setNetProfit] = useState(0);
+
+            // 初始化：從 LocalStorage 讀取資料
+            useEffect(() => {
+                try {
+                    const saved = localStorage.getItem('fishApp_data');
+                    if (saved) {
+                        const data = JSON.parse(saved);
+                        if (data.revenue) setRevenue(data.revenue);
+                        if (data.freshFishItems) setFreshFishItems(data.freshFishItems);
+                        if (data.frozenFishItems) setFrozenFishItems(data.frozenFishItems);
+                        if (data.supplies) setSupplies(data.supplies);
+                        if (data.wages) setWages(data.wages);
+                        if (data.rent) setRent(data.rent);
+                    }
+                } catch (e) {
+                    console.error("無法讀取存檔資料", e);
+                }
+            }, []);
+
+            // 工具函式
+            const parseNum = (val) => {
+                const num = parseFloat(val);
+                return isNaN(num) ? 0 : num;
+            };
+
+            const sumItems = (items) => {
+                return items.reduce((total, item) => total + parseNum(item.cost), 0);
+            };
+
+            const formatCurrency = (num) => {
+                return new Intl.NumberFormat('zh-TW', {
+                    style: 'currency',
+                    currency: 'TWD',
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0,
+                }).format(num);
+            };
+
+            // 核心計算與自動存檔邏輯
+            useEffect(() => {
+                const freshTotal = sumItems(freshFishItems);
+                const frozenTotal = sumItems(frozenFishItems);
+                
+                const cost = freshTotal + frozenTotal + parseNum(supplies);
+                const expense = parseNum(wages) + parseNum(rent);
+                const profit = parseNum(revenue) - cost - expense;
+
+                setTotalCost(cost);
+                setTotalExpense(expense);
+                setNetProfit(profit);
+
+                // 自動存檔
+                setSaveStatus('儲存中...');
+                const timeout = setTimeout(() => {
+                    const dataToSave = { revenue, freshFishItems, frozenFishItems, supplies, wages, rent };
+                    localStorage.setItem('fishApp_data', JSON.stringify(dataToSave));
+                    setSaveStatus('自動存檔完成');
+                    setTimeout(() => setSaveStatus(''), 2000);
+                }, 500);
+
+                return () => clearTimeout(timeout);
+            }, [revenue, freshFishItems, frozenFishItems, supplies, wages, rent]);
+
+            // 清除資料
+            const handleReset = () => {
+                if (window.confirm('確定要清除所有資料？這將開啟全新的一天。')) {
+                    setRevenue('');
+                    setFreshFishItems([{ id: Date.now().toString(), name: '', quantity: '', cost: '' }]);
+                    setFrozenFishItems([{ id: (Date.now() + 1).toString(), name: '', quantity: '', cost: '' }]);
+                    setSupplies('');
+                    setWages('');
+                    setRent('');
+                    localStorage.removeItem('fishApp_data');
+                    setActiveTab('morning');
+                }
+            };
+
+            // 動態清單操作
+            const handleAddItem = (type) => {
+                const newItem = { id: Date.now().toString(), name: '', quantity: '', cost: '' };
+                if (type === 'fresh') setFreshFishItems([...freshFishItems, newItem]);
+                else setFrozenFishItems([...frozenFishItems, newItem]);
+            };
+
+            const handleRemoveItem = (type, id) => {
+                if (type === 'fresh') setFreshFishItems(freshFishItems.filter(item => item.id !== id));
+                else setFrozenFishItems(frozenFishItems.filter(item => item.id !== id));
+            };
+
+            const handleItemChange = (type, id, field, value) => {
+                const updateList = (list) => list.map(item => item.id === id ? { ...item, [field]: value } : item);
+                if (type === 'fresh') setFreshFishItems(updateList(freshFishItems));
+                else setFrozenFishItems(updateList(frozenFishItems));
+            };
+
+            // 匯出為圖片
+            const handleDownloadImage = async () => {
+                const element = document.getElementById('summary-dashboard');
+                if (!element) return;
+                
+                setIsGeneratingImage(true);
+
+                try {
+                    if (!window.html2canvas) {
+                        await new Promise((resolve, reject) => {
+                            const script = document.createElement('script');
+                            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+                            script.onload = resolve;
+                            script.onerror = reject;
+                            document.head.appendChild(script);
+                        });
+                    }
+
+                    await new Promise(resolve => setTimeout(resolve, 100));
+
+                    const canvas = await window.html2canvas(element, {
+                        scale: 2,
+                        backgroundColor: '#ffffff',
+                        useCORS: true,
+                        logging: false
+                    });
+                    
+                    const dataUrl = canvas.toDataURL('image/png');
+                    const link = document.createElement('a');
+                    const today = new Date();
+                    const dateStr = `${today.getFullYear()}${(today.getMonth() + 1).toString().padStart(2, '0')}${today.getDate().toString().padStart(2, '0')}`;
+                    
+                    link.download = `營業結算_${dateStr}.png`;
+                    link.href = dataUrl;
+                    link.click();
+                } catch (err) {
+                    alert('圖片產生失敗，請稍後再試');
+                    console.error(err);
+                } finally {
+                    setIsGeneratingImage(false);
+                }
+            };
+
+            // 今日日期字串
+            const getTodayString = () => {
+                const today = new Date();
+                return `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()}`;
+            };
+
+            return (
+                <div className="min-h-screen pb-24">
+                    {/* 頂部導航 */}
+                    <div className="bg-blue-900 text-white shadow-md sticky top-0 z-40">
+                        <div className="max-w-2xl mx-auto px-4 py-3 sm:py-4 flex justify-between items-center">
+                            <div className="flex items-center space-x-2">
+                                <i className="fa-solid fa-calculator text-blue-200 text-xl"></i>
+                                <h1 className="text-lg font-bold tracking-wide">營收結算系統</h1>
+                            </div>
+                            <div className="flex items-center space-x-3">
+                                <span className="text-[10px] sm:text-xs text-blue-200 flex items-center transition-opacity duration-300">
+                                    {saveStatus && <><i className="fa-regular fa-circle-check mr-1"></i> {saveStatus}</>}
+                                </span>
+                                <button 
+                                    onClick={handleReset}
+                                    className="p-2 bg-blue-800 hover:bg-blue-700 rounded-lg transition"
+                                    title="清除今日所有資料"
+                                >
+                                    <i className="fa-solid fa-rotate"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="max-w-2xl mx-auto px-3 py-4 sm:p-6 space-y-4">
+                        
+                        {/* ================= 早上進貨分頁 ================= */}
+                        {activeTab === 'morning' && (
+                            <div className="space-y-4 animate-fade-in duration-300">
+                                <div className="bg-orange-50 text-orange-800 p-3 rounded-xl border border-orange-200 flex items-center text-sm font-medium">
+                                    <i className="fa-regular fa-sun text-lg mr-2"></i>
+                                    請輸入今日的進貨成本，資料會自動儲存在本機。
+                                </div>
+
+                                {/* 銷貨成本 */}
+                                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-6">
+                                    <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between">
+                                        <h2 className="text-lg font-bold text-slate-800 flex items-center">
+                                            <i className="fa-solid fa-file-invoice-dollar mr-2 text-orange-500 text-lg"></i> 銷貨成本
+                                        </h2>
+                                        <span className="text-sm font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded-lg">
+                                            累計: {formatCurrency(sumItems(freshFishItems) + sumItems(frozenFishItems) + parseNum(supplies))}
+                                        </span>
+                                    </div>
+                                    
+                                    <div className="p-4 sm:p-5 space-y-5">
+                                        {/* 現撈魚貨 */}
+                                        <div>
+                                            <button onClick={() => toggleSection('fresh')} className="w-full flex items-center justify-between mb-3 focus:outline-none">
+                                                <label className="text-base font-bold text-slate-700 flex items-center pointer-events-none">
+                                                    <i className="fa-solid fa-fish mr-2 text-blue-500 text-lg"></i> 今日魚貨（現撈）
+                                                </label>
+                                                <div className="flex items-center space-x-2">
+                                                    <span className="text-sm font-semibold text-slate-500">{formatCurrency(sumItems(freshFishItems))}</span>
+                                                    <i className={`fa-solid ${expandedSections.fresh ? 'fa-chevron-up' : 'fa-chevron-down'} text-slate-400 text-lg`}></i>
+                                                </div>
+                                            </button>
+                                            
+                                            <div className={`space-y-3 ${expandedSections.fresh ? 'block' : 'hidden'}`}>
+                                                {freshFishItems.map((item) => (
+                                                    <div key={item.id} className="bg-slate-50 border border-slate-100 p-3 rounded-xl flex flex-col space-y-2 relative">
+                                                        <button onClick={() => handleRemoveItem('fresh', item.id)} className="absolute right-2 top-2 p-1.5 text-slate-400 hover:text-red-500 bg-white rounded-lg border border-slate-200 shadow-sm transition">
+                                                            <i className="fa-solid fa-trash-can"></i>
+                                                        </button>
+                                                        <input
+                                                            type="text"
+                                                            className="w-full pr-10 px-3 py-2.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-sm placeholder-slate-400"
+                                                            placeholder="品名 (例: 鮭魚)"
+                                                            value={item.name}
+                                                            onChange={(e) => handleItemChange('fresh', item.id, 'name', e.target.value)}
+                                                        />
+                                                        <div className="flex items-center space-x-2">
+                                                            <div className="flex-1 relative">
+                                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">數量</span>
+                                                                <input
+                                                                    type="number" inputMode="numeric" min="0"
+                                                                    className="w-full pl-10 pr-2 py-2.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-sm"
+                                                                    placeholder="0" value={item.quantity} onChange={(e) => handleItemChange('fresh', item.id, 'quantity', e.target.value)}
+                                                                />
+                                                            </div>
+                                                            <div className="flex-1 relative">
+                                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+                                                                <input
+                                                                    type="number" inputMode="numeric" min="0"
+                                                                    className="w-full pl-7 pr-3 py-2.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-sm font-medium"
+                                                                    placeholder="總價" value={item.cost} onChange={(e) => handleItemChange('fresh', item.id, 'cost', e.target.value)}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                        {parseNum(item.quantity) > 0 && parseNum(item.cost) > 0 && (
+                                                            <div className="text-right text-xs font-bold text-slate-500 pt-0.5">
+                                                                單件均價: <span className="text-orange-600">{formatCurrency(parseNum(item.cost) / parseNum(item.quantity))}</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                                <button onClick={() => handleAddItem('fresh')} className="w-full flex items-center justify-center text-sm font-bold text-blue-600 bg-blue-50 py-3 rounded-xl border border-blue-100 hover:bg-blue-100 transition">
+                                                    <i className="fa-solid fa-plus mr-1"></i> 新增現撈品項
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <hr className="border-slate-100" />
+
+                                        {/* 冷凍魚貨 */}
+                                        <div>
+                                            <button onClick={() => toggleSection('frozen')} className="w-full flex items-center justify-between mb-3 focus:outline-none">
+                                                <label className="text-base font-bold text-slate-700 flex items-center pointer-events-none">
+                                                    <i className="fa-regular fa-snowflake mr-2 text-cyan-500 text-lg"></i> 固定成本（冷凍）
+                                                </label>
+                                                <div className="flex items-center space-x-2">
+                                                    <span className="text-sm font-semibold text-slate-500">{formatCurrency(sumItems(frozenFishItems))}</span>
+                                                    <i className={`fa-solid ${expandedSections.frozen ? 'fa-chevron-up' : 'fa-chevron-down'} text-slate-400 text-lg`}></i>
+                                                </div>
+                                            </button>
+                                            
+                                            <div className={`space-y-3 ${expandedSections.frozen ? 'block' : 'hidden'}`}>
+                                                {frozenFishItems.map((item) => (
+                                                    <div key={item.id} className="bg-slate-50 border border-slate-100 p-3 rounded-xl flex flex-col space-y-2 relative">
+                                                        <button onClick={() => handleRemoveItem('frozen', item.id)} className="absolute right-2 top-2 p-1.5 text-slate-400 hover:text-red-500 bg-white rounded-lg border border-slate-200 shadow-sm transition">
+                                                            <i className="fa-solid fa-trash-can"></i>
+                                                        </button>
+                                                        <input
+                                                            type="text"
+                                                            className="w-full pr-10 px-3 py-2.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 text-sm placeholder-slate-400"
+                                                            placeholder="品名 (例: 干貝)"
+                                                            value={item.name}
+                                                            onChange={(e) => handleItemChange('frozen', item.id, 'name', e.target.value)}
+                                                        />
+                                                        <div className="flex items-center space-x-2">
+                                                            <div className="flex-1 relative">
+                                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">數量</span>
+                                                                <input
+                                                                    type="number" inputMode="numeric" min="0"
+                                                                    className="w-full pl-10 pr-2 py-2.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 text-sm"
+                                                                    placeholder="0" value={item.quantity} onChange={(e) => handleItemChange('frozen', item.id, 'quantity', e.target.value)}
+                                                                />
+                                                            </div>
+                                                            <div className="flex-1 relative">
+                                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+                                                                <input
+                                                                    type="number" inputMode="numeric" min="0"
+                                                                    className="w-full pl-7 pr-3 py-2.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 text-sm font-medium"
+                                                                    placeholder="總價" value={item.cost} onChange={(e) => handleItemChange('frozen', item.id, 'cost', e.target.value)}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                        {parseNum(item.quantity) > 0 && parseNum(item.cost) > 0 && (
+                                                            <div className="text-right text-xs font-bold text-slate-500 pt-0.5">
+                                                                單件均價: <span className="text-cyan-600">{formatCurrency(parseNum(item.cost) / parseNum(item.quantity))}</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                                <button onClick={() => handleAddItem('frozen')} className="w-full flex items-center justify-center text-sm font-bold text-cyan-600 bg-cyan-50 py-3 rounded-xl border border-cyan-100 hover:bg-cyan-100 transition">
+                                                    <i className="fa-solid fa-plus mr-1"></i> 新增冷凍品項
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <hr className="border-slate-100" />
+
+                                        {/* 耗材 */}
+                                        <div>
+                                            <label className="text-base font-bold text-slate-700 flex items-center mb-2">
+                                                <i className="fa-solid fa-fire mr-2 text-orange-500 text-lg"></i> 木炭與包材耗損
+                                            </label>
+                                            <div className="relative">
+                                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-medium">$</span>
+                                                <input
+                                                    type="number" inputMode="numeric" min="0"
+                                                    className="w-full pl-9 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 text-base"
+                                                    placeholder="耗材總金額" value={supplies} onChange={(e) => setSupplies(e.target.value)}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                {/* 導引按鈕 */}
+                                <button 
+                                    onClick={() => { setActiveTab('evening'); window.scrollTo(0,0); }}
+                                    className="w-full py-4 bg-slate-800 text-white rounded-xl font-bold text-lg shadow-lg flex justify-center items-center active:bg-slate-700"
+                                >
+                                    進貨已完成，前往晚上結算
+                                </button>
+                            </div>
+                        )}
+
+
+                        {/* ================= 晚上結算分頁 ================= */}
+                        {activeTab === 'evening' && (
+                            <div className="space-y-6 animate-fade-in duration-300">
+                                
+                                {/* 營業額輸入 */}
+                                <div className="bg-white rounded-2xl shadow-sm border-2 border-emerald-400 p-5 overflow-hidden">
+                                    <h2 className="text-xl font-bold text-slate-800 mb-4 flex items-center justify-center">
+                                        <div className="bg-emerald-100 rounded-full w-10 h-10 flex items-center justify-center mr-2">
+                                            <i className="fa-solid fa-dollar-sign text-emerald-500 text-xl"></i>
+                                        </div>
+                                        輸入今日總營業額
+                                    </h2>
+                                    <div className="relative">
+                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-xl font-medium">$</span>
+                                        <input
+                                            type="number"
+                                            inputMode="numeric"
+                                            min="0"
+                                            className="w-full pl-10 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 transition-all text-3xl font-black text-center text-slate-800 placeholder-slate-300"
+                                            placeholder="0"
+                                            value={revenue}
+                                            onChange={(e) => setRevenue(e.target.value)}
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* 營業費用輸入 */}
+                                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                                    <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between">
+                                        <h2 className="text-lg font-bold text-slate-800 flex items-center">
+                                            <i className="fa-solid fa-wallet mr-2 text-purple-500 text-lg"></i> 營業費用
+                                        </h2>
+                                        <span className="text-sm font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded-lg">
+                                            累計: {formatCurrency(totalExpense)}
+                                        </span>
+                                    </div>
+                                    <div className="p-4 sm:p-5 space-y-4">
+                                        <div>
+                                            <label className="block text-sm font-bold text-slate-700 mb-2">當日薪資</label>
+                                            <div className="relative">
+                                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-medium">$</span>
+                                                <input
+                                                    type="number" inputMode="numeric" min="0"
+                                                    className="w-full pl-9 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500 text-base"
+                                                    placeholder="0" value={wages} onChange={(e) => setWages(e.target.value)}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center">
+                                                <i className="fa-solid fa-store mr-2 text-slate-500"></i> 每日店租分攤
+                                            </label>
+                                            <div className="relative">
+                                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-medium">$</span>
+                                                <input
+                                                    type="number" inputMode="numeric" min="0"
+                                                    className="w-full pl-9 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500 text-base"
+                                                    placeholder="0" value={rent} onChange={(e) => setRent(e.target.value)}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 結果儀表板 (會被截圖的區域) */}
+                                <div id="summary-dashboard" className="bg-white rounded-2xl shadow-md border border-slate-200 p-5 sm:p-6 relative">
+                                    <div className="absolute top-0 left-0 w-full h-2 bg-blue-900 rounded-t-2xl"></div>
+                                    
+                                    <div className="text-center mb-6 pt-2">
+                                        <h2 className="text-xl font-black text-slate-800">📊 每日結算報表</h2>
+                                        <p className="text-slate-500 text-sm mt-1">{getTodayString()}</p>
+                                    </div>
+                                    
+                                    <div className="space-y-4">
+                                        {/* 營業額 */}
+                                        <div className="flex justify-between items-center p-3 bg-slate-50 rounded-xl">
+                                            <span className="text-slate-600 font-bold">總營業收入</span>
+                                            <span className="text-xl font-black text-slate-800">
+                                                {formatCurrency(parseNum(revenue))}
+                                            </span>
+                                        </div>
+
+                                        {/* 當日總成本 */}
+                                        <div className="flex flex-col p-4 bg-orange-50 rounded-xl border border-orange-100 space-y-3">
+                                            <div className="flex justify-between items-center border-b border-orange-200/60 pb-3">
+                                                <span className="text-orange-800 font-bold text-lg">總銷貨成本</span>
+                                                <span className="text-xl font-bold text-orange-600">
+                                                    - {formatCurrency(totalCost)}
+                                                </span>
+                                            </div>
+                                            
+                                            <div className="text-sm text-orange-800 space-y-4">
+                                                {/* 現撈細項 */}
+                                                {freshFishItems.some(item => item.name || parseNum(item.cost) > 0) && (
+                                                    <div>
+                                                        <div className="font-bold text-orange-700 mb-2 flex items-center bg-orange-100/50 p-1.5 rounded-lg">
+                                                            <i className="fa-solid fa-fish mr-2"></i> 現撈魚貨
+                                                        </div>
+                                                        <div className="space-y-2 pl-2">
+                                                            {freshFishItems.filter(item => item.name || parseNum(item.cost) > 0).map(item => {
+                                                                const q = parseNum(item.quantity);
+                                                                const c = parseNum(item.cost);
+                                                                return (
+                                                                    <div key={item.id} className="flex justify-between items-center border-b border-orange-100/50 pb-1.5 last:border-0 last:pb-0">
+                                                                        <div className="flex flex-col">
+                                                                            <span className="text-orange-800 font-medium">
+                                                                                {item.name || '未命名'} 
+                                                                                {q > 0 && <span className="text-xs text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded ml-2 font-bold">x {item.quantity}</span>}
+                                                                            </span>
+                                                                            {q > 0 && c > 0 && (
+                                                                                <span className="text-[11px] text-orange-500 mt-0.5">
+                                                                                    單件均價: {formatCurrency(c / q)}
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                        <span className="font-bold text-orange-700">{formatCurrency(c)}</span>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* 冷凍細項 */}
+                                                {frozenFishItems.some(item => item.name || parseNum(item.cost) > 0) && (
+                                                    <div>
+                                                        <div className="font-bold text-orange-700 mb-2 flex items-center bg-orange-100/50 p-1.5 rounded-lg">
+                                                            <i className="fa-regular fa-snowflake mr-2"></i> 冷凍魚貨
+                                                        </div>
+                                                        <div className="space-y-2 pl-2">
+                                                            {frozenFishItems.filter(item => item.name || parseNum(item.cost) > 0).map(item => {
+                                                                const q = parseNum(item.quantity);
+                                                                const c = parseNum(item.cost);
+                                                                return (
+                                                                    <div key={item.id} className="flex justify-between items-center border-b border-orange-100/50 pb-1.5 last:border-0 last:pb-0">
+                                                                        <div className="flex flex-col">
+                                                                            <span className="text-orange-800 font-medium">
+                                                                                {item.name || '未命名'} 
+                                                                                {q > 0 && <span className="text-xs text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded ml-2 font-bold">x {item.quantity}</span>}
+                                                                            </span>
+                                                                            {q > 0 && c > 0 && (
+                                                                                <span className="text-[11px] text-orange-500 mt-0.5">
+                                                                                    單件均價: {formatCurrency(c / q)}
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                        <span className="font-bold text-orange-700">{formatCurrency(c)}</span>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* 耗材細項 */}
+                                                {parseNum(supplies) > 0 && (
+                                                    <div className="pt-3 border-t border-orange-200/60 mt-2">
+                                                        <div className="flex justify-between items-center pl-1.5 pr-1">
+                                                            <span className="font-bold text-orange-700 flex items-center"><i className="fa-solid fa-fire mr-2"></i> 木炭與包材耗損</span>
+                                                            <span className="font-bold text-orange-700">{formatCurrency(parseNum(supplies))}</span>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* 當日總費用 */}
+                                        <div className="flex justify-between items-center p-3 bg-purple-50 rounded-xl border border-purple-100">
+                                            <span className="text-purple-800 font-bold">營業總費用</span>
+                                            <span className="text-lg font-bold text-purple-600">
+                                                - {formatCurrency(totalExpense)}
+                                            </span>
+                                        </div>
+
+                                        {/* 淨利 */}
+                                        <div className="pt-4 border-t-2 border-slate-100 mt-6">
+                                            <div className="flex flex-col">
+                                                <span className="text-slate-500 text-sm font-bold mb-2">最終結算淨利</span>
+                                                <div className={`flex items-center justify-between p-4 sm:p-5 rounded-2xl border-2 ${
+                                                    netProfit > 0 
+                                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700' 
+                                                        : netProfit < 0 
+                                                            ? 'bg-red-50 border-red-200 text-red-700'
+                                                            : 'bg-slate-100 border-slate-200 text-slate-700'
+                                                }`}>
+                                                    <div className="flex items-center space-x-2">
+                                                        {netProfit > 0 ? (
+                                                            <i className="fa-solid fa-arrow-trend-up text-emerald-500 text-2xl"></i>
+                                                        ) : netProfit < 0 ? (
+                                                            <i className="fa-solid fa-arrow-trend-down text-red-500 text-2xl"></i>
+                                                        ) : (
+                                                            <i className="fa-solid fa-wallet text-slate-400 text-2xl"></i>
+                                                        )}
+                                                        <span className="text-3xl sm:text-4xl font-black tracking-tighter">
+                                                            {formatCurrency(netProfit)}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* 利潤率 */}
+                                        {parseNum(revenue) > 0 && (
+                                            <div className="mt-4 text-center">
+                                                <span className="inline-block bg-slate-100 text-slate-600 text-sm font-bold px-4 py-2 rounded-full">
+                                                    淨利率: <span className={netProfit > 0 ? "text-emerald-600" : "text-red-500"}>
+                                                        {((netProfit / parseNum(revenue)) * 100).toFixed(1)}%
+                                                    </span>
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* 下載區塊 */}
+                                <div className="grid grid-cols-1 gap-3 pb-8">
+                                    <button 
+                                        onClick={handleDownloadImage}
+                                        disabled={isGeneratingImage}
+                                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-base sm:text-lg shadow-md flex justify-center items-center transition-all disabled:opacity-70 disabled:cursor-not-allowed active:scale-[0.98]"
+                                    >
+                                        {isGeneratingImage ? (
+                                            <i className="fa-solid fa-rotate fa-spin mr-2 text-xl"></i>
+                                        ) : (
+                                            <i className="fa-solid fa-camera mr-2 text-xl"></i>
+                                        )}
+                                        {isGeneratingImage ? '圖片產生中...' : '📥 下載結算報表 (圖片)'}
+                                    </button>
+                                </div>
+
+                            </div>
+                        )}
+
+                    </div>
+
+                    {/* ================= 底部 App 導航列 ================= */}
+                    <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-50 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.05)] pb-safe">
+                        <div className="flex justify-around items-center h-16 max-w-2xl mx-auto">
+                            <button 
+                                onClick={() => { setActiveTab('morning'); window.scrollTo(0,0); }} 
+                                className={`flex flex-col items-center justify-center w-full h-full relative transition-colors ${activeTab === 'morning' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                                {activeTab === 'morning' && <div className="absolute top-0 w-8 h-1 bg-blue-600 rounded-b-full"></div>}
+                                <i className={`fa-regular fa-sun text-2xl ${activeTab === 'morning' ? 'scale-110 duration-300' : ''}`}></i>
+                                <span className="text-[11px] font-bold mt-1">早上進貨</span>
+                            </button>
+                            
+                            <div className="w-[1px] h-8 bg-slate-200"></div>
+
+                            <button 
+                                onClick={() => { setActiveTab('evening'); window.scrollTo(0,0); }} 
+                                className={`flex flex-col items-center justify-center w-full h-full relative transition-colors ${activeTab === 'evening' ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                                {activeTab === 'evening' && <div className="absolute top-0 w-8 h-1 bg-indigo-600 rounded-b-full"></div>}
+                                <i className={`fa-regular fa-moon text-2xl ${activeTab === 'evening' ? 'scale-110 duration-300' : ''}`}></i>
+                                <span className="text-[11px] font-bold mt-1">晚上結算</span>
+                            </button>
+                        </div>
+                    </div>
+
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
