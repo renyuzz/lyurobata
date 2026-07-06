@@ -39,7 +39,17 @@
             const defaultFresh = [{ id: 'fresh-1', name: '', quantity: '', cost: '' }];
             const defaultFrozen = [{ id: 'frozen-1', name: '', quantity: '', cost: '' }];
 
+            // 取得今日日期 (YYYY-MM-DD)
+            const getTodayYYYYMMDD = () => {
+                const today = new Date();
+                const yyyy = today.getFullYear();
+                const mm = String(today.getMonth() + 1).padStart(2, '0');
+                const dd = String(today.getDate()).padStart(2, '0');
+                return `${yyyy}-${mm}-${dd}`;
+            };
+
             // 狀態管理
+            const [selectedDate, setSelectedDate] = useState(getTodayYYYYMMDD());
             const [activeTab, setActiveTab] = useState('morning'); // 'morning' | 'evening'
             const [saveStatus, setSaveStatus] = useState('已同步');
             const [isGeneratingImage, setIsGeneratingImage] = useState(false);
@@ -69,23 +79,47 @@
             const [totalExpense, setTotalExpense] = useState(0);
             const [netProfit, setNetProfit] = useState(0);
 
-            // 初始化：從 LocalStorage 讀取資料
+            // 初始化與切換日期時：從 LocalStorage 讀取該日資料
             useEffect(() => {
                 try {
-                    const saved = localStorage.getItem('fishApp_data');
-                    if (saved) {
-                        const data = JSON.parse(saved);
-                        if (data.revenue) setRevenue(data.revenue);
-                        if (data.freshFishItems) setFreshFishItems(data.freshFishItems);
-                        if (data.frozenFishItems) setFrozenFishItems(data.frozenFishItems);
-                        if (data.supplies) setSupplies(data.supplies);
-                        if (data.wages) setWages(data.wages);
-                        if (data.rent) setRent(data.rent);
+                    const specificSaved = localStorage.getItem(`fishApp_data_${selectedDate}`);
+                    if (specificSaved) {
+                        const data = JSON.parse(specificSaved);
+                        setRevenue(data.revenue || '');
+                        setFreshFishItems(data.freshFishItems || defaultFresh);
+                        setFrozenFishItems(data.frozenFishItems || defaultFrozen);
+                        setSupplies(data.supplies || '');
+                        setWages(data.wages || '');
+                        setRent(data.rent || '');
+                    } else {
+                        // 嘗試讀取舊版資料 (向下相容)
+                        const todayStr = getTodayYYYYMMDD();
+                        if (selectedDate === todayStr) {
+                            const oldSaved = localStorage.getItem('fishApp_data');
+                            if (oldSaved) {
+                                const data = JSON.parse(oldSaved);
+                                setRevenue(data.revenue || '');
+                                setFreshFishItems(data.freshFishItems || defaultFresh);
+                                setFrozenFishItems(data.frozenFishItems || defaultFrozen);
+                                setSupplies(data.supplies || '');
+                                setWages(data.wages || '');
+                                setRent(data.rent || '');
+                                return; // 提早結束，保留舊資料
+                            }
+                        }
+
+                        // 如果該日完全沒資料，清空為預設狀態
+                        setRevenue('');
+                        setFreshFishItems([{ id: Date.now().toString() + '-fresh', name: '', quantity: '', cost: '' }]);
+                        setFrozenFishItems([{ id: Date.now().toString() + '-frozen', name: '', quantity: '', cost: '' }]);
+                        setSupplies('');
+                        setWages('');
+                        setRent('');
                     }
                 } catch (e) {
                     console.error("無法讀取存檔資料", e);
                 }
-            }, []);
+            }, [selectedDate]);
 
             // 工具函式
             const parseNum = (val) => {
@@ -119,29 +153,37 @@
                 setTotalExpense(expense);
                 setNetProfit(profit);
 
-                // 自動存檔
+                // 自動存檔 (依據選擇的日期分開儲存)
                 setSaveStatus('儲存中...');
                 const timeout = setTimeout(() => {
                     const dataToSave = { revenue, freshFishItems, frozenFishItems, supplies, wages, rent };
-                    localStorage.setItem('fishApp_data', JSON.stringify(dataToSave));
+                    localStorage.setItem(`fishApp_data_${selectedDate}`, JSON.stringify(dataToSave));
+                    
+                    // 為了相容性，如果是今天也同步寫入舊版 key
+                    if (selectedDate === getTodayYYYYMMDD()) {
+                        localStorage.setItem('fishApp_data', JSON.stringify(dataToSave));
+                    }
+                    
                     setSaveStatus('自動存檔完成');
                     setTimeout(() => setSaveStatus(''), 2000);
                 }, 500);
 
                 return () => clearTimeout(timeout);
-            }, [revenue, freshFishItems, frozenFishItems, supplies, wages, rent]);
+            }, [revenue, freshFishItems, frozenFishItems, supplies, wages, rent, selectedDate]);
 
             // 清除資料
             const handleReset = () => {
-                if (window.confirm('確定要清除所有資料？這將開啟全新的一天。')) {
+                if (window.confirm(`確定要清除 ${selectedDate.replace(/-/g, '/')} 的所有資料嗎？`)) {
                     setRevenue('');
                     setFreshFishItems([{ id: Date.now().toString(), name: '', quantity: '', cost: '' }]);
                     setFrozenFishItems([{ id: (Date.now() + 1).toString(), name: '', quantity: '', cost: '' }]);
                     setSupplies('');
                     setWages('');
                     setRent('');
-                    localStorage.removeItem('fishApp_data');
-                    setActiveTab('morning');
+                    localStorage.removeItem(`fishApp_data_${selectedDate}`);
+                    if (selectedDate === getTodayYYYYMMDD()) {
+                        localStorage.removeItem('fishApp_data');
+                    }
                 }
             };
 
@@ -192,8 +234,7 @@
                     
                     const dataUrl = canvas.toDataURL('image/png');
                     const link = document.createElement('a');
-                    const today = new Date();
-                    const dateStr = `${today.getFullYear()}${(today.getMonth() + 1).toString().padStart(2, '0')}${today.getDate().toString().padStart(2, '0')}`;
+                    const dateStr = selectedDate.replace(/-/g, '');
                     
                     link.download = `營業結算_${dateStr}.png`;
                     link.href = dataUrl;
@@ -206,29 +247,34 @@
                 }
             };
 
-            // 今日日期字串
-            const getTodayString = () => {
-                const today = new Date();
-                return `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()}`;
-            };
-
             return (
                 <div className="min-h-screen pb-24">
                     {/* 頂部導航 */}
                     <div className="bg-blue-900 text-white shadow-md sticky top-0 z-40">
-                        <div className="max-w-2xl mx-auto px-4 py-3 sm:py-4 flex justify-between items-center">
+                        <div className="max-w-2xl mx-auto px-3 sm:px-4 py-3 sm:py-4 flex justify-between items-center">
                             <div className="flex items-center space-x-2">
-                                <i className="fa-solid fa-calculator text-blue-200 text-xl"></i>
-                                <h1 className="text-lg font-bold tracking-wide">營收結算系統</h1>
+                                <i className="fa-solid fa-calculator text-blue-200 text-xl hidden sm:block"></i>
+                                <h1 className="text-lg font-bold tracking-wide hidden sm:block mr-2">營收結算</h1>
+                                
+                                {/* 日期選擇器 */}
+                                <div className="flex items-center bg-blue-800 px-2 py-1.5 sm:px-3 rounded-lg border border-blue-700">
+                                    <i className="fa-regular fa-calendar text-blue-300 mr-2"></i>
+                                    <input 
+                                        type="date" 
+                                        value={selectedDate}
+                                        onChange={(e) => setSelectedDate(e.target.value)}
+                                        className="bg-transparent text-white text-sm sm:text-base font-medium outline-none cursor-pointer [color-scheme:dark]" 
+                                    />
+                                </div>
                             </div>
-                            <div className="flex items-center space-x-3">
+                            <div className="flex items-center space-x-2 sm:space-x-3">
                                 <span className="text-[10px] sm:text-xs text-blue-200 flex items-center transition-opacity duration-300">
                                     {saveStatus && <><i className="fa-regular fa-circle-check mr-1"></i> {saveStatus}</>}
                                 </span>
                                 <button 
                                     onClick={handleReset}
-                                    className="p-2 bg-blue-800 hover:bg-blue-700 rounded-lg transition"
-                                    title="清除今日所有資料"
+                                    className="p-2 bg-blue-800 hover:bg-blue-700 rounded-lg transition flex-shrink-0"
+                                    title="清除當日資料"
                                 >
                                     <i className="fa-solid fa-rotate"></i>
                                 </button>
@@ -243,7 +289,7 @@
                             <div className="space-y-4 animate-fade-in duration-300">
                                 <div className="bg-orange-50 text-orange-800 p-3 rounded-xl border border-orange-200 flex items-center text-sm font-medium">
                                     <i className="fa-regular fa-sun text-lg mr-2"></i>
-                                    請輸入今日的進貨成本，資料會自動儲存在本機。
+                                    目前記錄：{selectedDate.replace(/-/g, '/')}。資料會自動儲存於本機。
                                 </div>
 
                                 {/* 銷貨成本 */}
@@ -472,7 +518,7 @@
                                     
                                     <div className="text-center mb-6 pt-2">
                                         <h2 className="text-xl font-black text-slate-800">📊 每日結算報表</h2>
-                                        <p className="text-slate-500 text-sm mt-1">{getTodayString()}</p>
+                                        <p className="text-slate-500 text-sm mt-1">{selectedDate.replace(/-/g, '/')}</p>
                                     </div>
                                     
                                     <div className="space-y-4">
